@@ -1,4 +1,5 @@
-﻿using CoreSharef.Repository;
+﻿using CoreSharef.Models;
+using CoreSharef.Repository;
 using Microsoft.AspNetCore.Mvc;
 using Minio;
 using Minio.DataModel.Args;
@@ -13,6 +14,7 @@ public class FileController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly FileRepository _fileRepository;
     private readonly IMinioClient _minioClient;
+    private readonly CacheRepository _cacheRepository;
 
     public FileController(IConfiguration configuration)
     {
@@ -21,6 +23,7 @@ public class FileController : ControllerBase
             .WithCredentials(_configuration.GetConnectionString("MinioAccess"),
                 _configuration.GetConnectionString("MinioSecret")).Build();
         _fileRepository = new FileRepository(_configuration.GetConnectionString("MongoDBConnection"), "Core");
+        _cacheRepository = new CacheRepository(_configuration.GetConnectionString("MongoDBConnection"), "Core");
     }
 
     [HttpGet]
@@ -44,6 +47,26 @@ public class FileController : ControllerBase
             return NotFound(new {Data = fileList});
         }
     }
+
+    [HttpGet("test")]
+    public async Task<IActionResult> Test()
+    {
+        return Ok();
+    }
+
+    [HttpGet("receive/{code}")]
+    public async Task<IActionResult> Receive([FromRoute] string code)
+    {
+        var c = _cacheRepository.GetCacheByCode(code);
+        if (c != null)
+        {
+            return Ok();
+        } 
+        else
+        {
+            return NotFound();
+        }
+    }
     
     [HttpGet("file/{code}")]
     public async Task<IActionResult> GetFile([FromRoute] string code)
@@ -56,7 +79,8 @@ public class FileController : ControllerBase
             {
                 _fileRepository.Delete(file.Code);                                                                                                                                                
                 var url = _minioClient.PresignedGetObjectAsync(new PresignedGetObjectArgs().WithBucket("sharef").WithObject(file.Name).WithExpiry(100000)).ConfigureAwait(true);
-                return Ok(new {Data = url.GetAwaiter().GetResult()});                                                                                                                             
+                _cacheRepository.Delete(code);
+                return Ok(new {Data = url.GetAwaiter().GetResult(), Name = file.Name});                                                                                                                             
             }
             catch (Exception e)
             {
@@ -92,6 +116,10 @@ public class FileController : ControllerBase
             };
 
             _fileRepository.Insert(newFile);
+            _cacheRepository.Insert(new Cache
+            {
+                Code = code
+            });
 
             return Ok(new { Data = newFile });
         }
